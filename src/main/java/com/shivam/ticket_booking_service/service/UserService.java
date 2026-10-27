@@ -10,17 +10,27 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+//new
+import com.shivam.ticket_booking_service.dto.LoginRequest;
+import com.shivam.ticket_booking_service.dto.LoginResponse;
+import com.shivam.ticket_booking_service.security.JwtService;
+import org.springframework.security.authentication.BadCredentialsException;
+
 @Service
 public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
 
     public UserService(
             UserRepository userRepository,
-            PasswordEncoder passwordEncoder) {
+            PasswordEncoder passwordEncoder,
+            JwtService jwtService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
+        
     }
 
     @Transactional
@@ -48,5 +58,42 @@ public class UserService {
                 savedUser.getRole().name()
                 
         );
+        
+        
+        
     }
+    
+
+public LoginResult login(LoginRequest request) {
+
+    String email = request.email().trim().toLowerCase();
+
+    User user = userRepository.findByEmail(email)
+            .orElseThrow(() ->
+                    new BadCredentialsException("Invalid email or password"));
+
+    if (!passwordEncoder.matches(
+            request.password(), user.getPassword())) {
+        throw new BadCredentialsException("Invalid email or password");
+    }
+
+    String token = jwtService.generateToken(
+            user.getId(),
+            user.getEmail(),
+            user.getRole().name()
+    );
+
+    LoginResponse response = new LoginResponse(
+            "Login successful",
+            user.getId(),
+            user.getName(),
+            user.getEmail(),
+            user.getRole().name()
+    );
+
+    return new LoginResult(token, response);
+}
+
+public record LoginResult(String token, LoginResponse response) {}
+
 }

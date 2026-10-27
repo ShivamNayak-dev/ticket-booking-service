@@ -16,16 +16,32 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
-    @Bean
-    public SecurityFilterChain securityFilterChain(
-            HttpSecurity http) throws Exception {
 
-        http
-            .csrf(csrf -> csrf.disable())
-            .authorizeHttpRequests(auth -> auth
-                .anyRequest().permitAll()
-            );
+@Bean
+public SecurityFilterChain securityFilterChain(
+        HttpSecurity http,
+        com.shivam.ticket_booking_service.security.JwtAuthenticationFilter jwtAuthenticationFilter)
+        throws Exception {
 
-        return http.build();
-    }
+    http
+        // Temporary while we build the API.
+        // Cookie-based authentication needs CSRF protection before production.
+        .csrf(csrf -> csrf.disable())
+
+        .authorizeHttpRequests(auth -> auth
+            .requestMatchers(
+                "/api/auth/register",
+                "/api/auth/login"
+            ).permitAll()
+            .anyRequest().authenticated()
+        )
+
+        .addFilterBefore(
+            jwtAuthenticationFilter,
+            org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter.class
+        );
+
+    return http.build();
+}
+
 }
