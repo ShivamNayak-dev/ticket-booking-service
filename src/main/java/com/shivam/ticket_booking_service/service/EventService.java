@@ -15,6 +15,9 @@ import org.springframework.cache.annotation.Cacheable;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import com.shivam.ticket_booking_service.exception.ResourceNotFoundException;
+import com.shivam.ticket_booking_service.exception.InvalidRequestException;
+
 @Service
 public class EventService {
 
@@ -54,8 +57,8 @@ public class EventService {
     @Transactional(readOnly = true)
     public EventResponse getEventById(Long id) {
         Event event = eventRepository.findById(id)
-                .orElseThrow(() ->
-                        new IllegalArgumentException("Event not found: " + id));
+        		.orElseThrow(() ->
+                new ResourceNotFoundException("Event not found: " + id));
 
         return toResponse(event);
     }
@@ -72,8 +75,8 @@ public class EventService {
 
         if (startDate != null && endDate != null
                 && startDate.isAfter(endDate)) {
-            throw new IllegalArgumentException(
-                    "Start date must be before or equal to end date");
+        	throw new InvalidRequestException(
+        	        "Start date must be before or equal to end date");
         }
 
         return eventRepository.searchEvents(category, startDate, endDate)

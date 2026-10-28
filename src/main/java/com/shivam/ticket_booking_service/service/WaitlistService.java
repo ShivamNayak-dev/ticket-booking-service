@@ -109,6 +109,19 @@ public class WaitlistService {
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.UNAUTHORIZED, "User not found"));
 
+        // Lock in the same order as booking/promotion: event first, then entry.
+        // This prevents cancellation racing with promotion after seats are released.
+        WaitlistEntry initialEntry = waitlistRepository.findById(entryId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Waitlist entry not found"));
+
+        Event lockedEvent = eventRepository.findByIdForUpdate(
+                initialEntry.getEvent().getId());
+        if (lockedEvent == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND, "Event not found");
+        }
+
         WaitlistEntry entry = waitlistRepository
                 .findByIdForUpdate(entryId)
                 .orElseThrow(() -> new ResponseStatusException(

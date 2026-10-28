@@ -17,7 +17,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
+import java.util.Map;
 
+import com.shivam.ticket_booking_service.dto.CurrentUserResponse;
+import org.springframework.security.core.Authentication;
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
@@ -64,4 +67,30 @@ public class AuthController {
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
                 .body(result.response());
     }
+
+    @GetMapping("/me")
+    public CurrentUserResponse getCurrentUser(
+            Authentication authentication) {
+
+        return userService.getCurrentUser(authentication.getName());
+    }
+
+
+@PostMapping("/logout")
+public ResponseEntity<Map<String, String>> logout() {
+
+    ResponseCookie cookie = ResponseCookie
+            .from(cookieName, "")
+            .httpOnly(true)
+            .secure(secureCookie)
+            .path("/")
+            .sameSite("Lax")
+            .maxAge(0)
+            .build();
+
+    return ResponseEntity.ok()
+            .header(HttpHeaders.SET_COOKIE, cookie.toString())
+            .body(Map.of("message", "Logged out successfully"));
+}
+
 }

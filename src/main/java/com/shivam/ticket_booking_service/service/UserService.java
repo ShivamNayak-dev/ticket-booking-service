@@ -15,7 +15,8 @@ import com.shivam.ticket_booking_service.dto.LoginRequest;
 import com.shivam.ticket_booking_service.dto.LoginResponse;
 import com.shivam.ticket_booking_service.security.JwtService;
 import org.springframework.security.authentication.BadCredentialsException;
-
+import com.shivam.ticket_booking_service.dto.CurrentUserResponse;
+import org.springframework.transaction.annotation.Transactional;
 @Service
 public class UserService {
 
@@ -95,5 +96,21 @@ public LoginResult login(LoginRequest request) {
 }
 
 public record LoginResult(String token, LoginResponse response) {}
+
+@Transactional(readOnly = true)
+public CurrentUserResponse getCurrentUser(String email) {
+
+    User user = userRepository.findByEmail(email)
+            .orElseThrow(() ->
+                    new BadCredentialsException(
+                            "Authenticated user not found"));
+
+    return new CurrentUserResponse(
+            user.getId(),
+            user.getName(),
+            user.getEmail(),
+            user.getRole().name()
+    );
+}
 
 }

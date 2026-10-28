@@ -3,6 +3,8 @@ package com.shivam.ticket_booking_service.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
+import com.shivam.ticket_booking_service.entity.User;
+import com.shivam.ticket_booking_service.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.Cookie;
@@ -23,12 +25,15 @@ import java.util.List;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
+    private final UserRepository userRepository;
     private final String cookieName;
 
     public JwtAuthenticationFilter(
             JwtService jwtService,
+            UserRepository userRepository,
             @Value("${app.jwt.cookie-name}") String cookieName) {
         this.jwtService = jwtService;
+        this.userRepository = userRepository;
         this.cookieName = cookieName;
     }
 
@@ -58,23 +63,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Claims claims = jwtService.extractClaims(token);
 
                 String email = claims.getSubject();
-                String role = claims.get("role", String.class);
+                if (email != null) {
+                    // Read the current role from the database so role changes take
+                    // effect immediately instead of trusting a stale JWT claim.
+                    User user = userRepository.findByEmail(email).orElse(null);
+                    if (user != null) {
+                        String role = user.getRole().name();
+                        UsernamePasswordAuthenticationToken authentication =
+                                new UsernamePasswordAuthenticationToken(
+                                        user.getEmail(),
+                                        null,
+                                        List.of(new SimpleGrantedAuthority("ROLE_" + role))
+                                );
 
-                if (email != null && role != null) {
-                    UsernamePasswordAuthenticationToken authentication =
-                            new UsernamePasswordAuthenticationToken(
-                                    email,
-                                    null,
-                                    List.of(new SimpleGrantedAuthority("ROLE_" + role))
-                            );
+                        authentication.setDetails(
+                                new WebAuthenticationDetailsSource()
+                                        .buildDetails(request)
+                        );
 
-                    authentication.setDetails(
-                            new WebAuthenticationDetailsSource()
-                                    .buildDetails(request)
-                    );
-
-                    SecurityContextHolder.getContext()
-                            .setAuthentication(authentication);
+                        SecurityContextHolder.getContext()
+                                .setAuthentication(authentication);
+                    }
                 }
             } catch (JwtException | IllegalArgumentException exception) {
                 SecurityContextHolder.clearContext();
