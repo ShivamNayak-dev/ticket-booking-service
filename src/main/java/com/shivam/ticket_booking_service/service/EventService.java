@@ -9,6 +9,9 @@ import com.shivam.ticket_booking_service.repository.EventRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -21,6 +24,7 @@ public class EventService {
         this.eventRepository = eventRepository;
     }
 
+    @CacheEvict(cacheNames = {"eventDetails", "eventLists"}, allEntries = true)
     @Transactional
     public EventResponse createEvent(EventRequest request) {
         Event event = new Event();
@@ -35,7 +39,9 @@ public class EventService {
 
         return toResponse(eventRepository.save(event));
     }
-
+    
+    
+    @Cacheable(cacheNames = "eventLists", key = "'all'")
     @Transactional(readOnly = true)
     public List<EventResponse> getAllEvents() {
         return eventRepository.findAll()
@@ -44,6 +50,7 @@ public class EventService {
                 .toList();
     }
 
+    @Cacheable(cacheNames = "eventDetails", key = "#id")
     @Transactional(readOnly = true)
     public EventResponse getEventById(Long id) {
         Event event = eventRepository.findById(id)
@@ -53,6 +60,10 @@ public class EventService {
         return toResponse(event);
     }
 
+    @Cacheable(
+    	    cacheNames = "eventLists",
+    	    key = "'search:' + #category + ':' + #startDate + ':' + #endDate"
+    	)
     @Transactional(readOnly = true)
     public List<EventResponse> searchEvents(
             EventCategory category,

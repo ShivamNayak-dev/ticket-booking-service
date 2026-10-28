@@ -1,5 +1,8 @@
 package com.shivam.ticket_booking_service.entity;
 
-public class WaitlistStatus {
+public enum WaitlistStatus {
 
+	WAITING,
+    BOOKED,
+    CANCELLED
 }
