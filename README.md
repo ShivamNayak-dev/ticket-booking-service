@@ -1,63 +1,67 @@
 # Ticket Booking Service
 
-Spring Boot REST API for authenticated event ticket booking, seat locking, Redis caching, and waitlists.
+A small full-stack event ticketing application built for the Java Development assessment.
 
-## Requirements
+## Stack
 
-- JDK 21 or later
-- PostgreSQL
-- Redis
-- Maven (or the included Maven Wrapper)
+- Java 17, Spring Boot, Spring Security, JWT in HttpOnly cookies
+- PostgreSQL for users, events, tickets, and waitlist entries
+- Redis for event caching and short-lived seat holds
+- React + Vite for the browser client
 
-## Configuration
+## Run locally
 
-Configure `src/main/resources/application.properties` locally. Your existing local file is preserved unchanged in this archive and remains ignored by Git; do not commit it. Keep database credentials and the JWT signing secret out of version control. The application expects PostgreSQL and Redis connection settings, plus `app.jwt.secret`, `app.jwt.expiration-ms`, `app.jwt.cookie-name`, and `app.jwt.secure`.
+1. Install Java 17+, Maven, Node.js 18+, and Docker Desktop.
+2. From the project root, start PostgreSQL and Redis:
 
-The JWT secret must be a sufficiently long Base64-encoded key. For local HTTP development, `app.jwt.secure` is normally `false`; use secure cookies behind HTTPS in deployment.
+   ```sh
+   docker compose up -d
+   ```
 
-Create the database (for example `ticket_booking_db`) in PostgreSQL, then run `database/schema.sql` if you want to create the schema manually. If Hibernate schema generation is enabled in your local configuration, follow the existing configuration and avoid applying a conflicting schema to an existing database.
+3. In a terminal, start the API:
 
-## Run
+   ```sh
+   cd backend
+   mvn spring-boot:run
+   ```
 
-From the directory containing `pom.xml`:
+   The API runs at `http://localhost:8080`. Local defaults are provided by
+   `backend/src/main/resources/application.properties`; that file is ignored by
+   Git as requested. For deployment, set the variables listed in
+   `backend/.env.example` in your runtime environment (Spring Boot does not load
+   `.env` files by itself).
 
-```powershell
-.\mvnw.cmd clean test
-.\mvnw.cmd spring-boot:run
-```
+4. In another terminal, start the web client:
 
-Or use `mvn clean test` and `mvn spring-boot:run` if Maven is installed. The API runs on port `8080` by default unless your local configuration changes it.
+   ```sh
+   cd frontend
+   npm install
+   npm run dev
+   ```
 
-## Authentication and CSRF
-
-1. `GET /api/auth/csrf` to obtain a CSRF token and cookie.
-2. `POST /api/auth/register` to create a regular user.
-3. `GET /api/auth/csrf` again if needed, then `POST /api/auth/login` with the CSRF cookie and `X-XSRF-TOKEN` header. Login sets the HttpOnly JWT cookie.
-4. Send the cookies with authenticated requests. State-changing requests require the CSRF token header.
-5. `GET /api/auth/me` returns the current user; `POST /api/auth/logout` clears the JWT cookie.
-
-Registration always creates a `USER`. Event creation (`POST /api/events`) requires `ADMIN`. For local assessment testing, promote a specific account directly in PostgreSQL after registering it:
-
-```sql
-UPDATE users SET role = 'ADMIN' WHERE email = 'your-email@example.com';
-```
-
-Sign in again after changing the role.
+   Open `http://localhost:5173`.
 
 ## Main endpoints
 
-- `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`, `GET /api/auth/csrf`
-- `GET /api/events`, `GET /api/events/{id}`, `POST /api/events` (ADMIN only)
-- `POST /api/bookings`, `GET /api/bookings/my`, `POST /api/bookings/{bookingId}/cancel`
-- `POST /api/waitlist`, `GET /api/waitlist/my`, `POST /api/waitlist/{entryId}/cancel`
+- `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
+- `GET /api/events`, `GET /api/events/{id}`, `POST /api/events` (authenticated)
+- `POST /api/events/{eventId}/bookings`, `GET /api/bookings/mine`
+- `POST /api/events/{eventId}/waitlist`, `GET /api/events/{eventId}/waitlist/mine`
 
-Event listing supports optional `category`, `startDate`, and `endDate` query parameters using ISO local date-time values, for example `2027-01-15T10:00:00`. Invalid date ranges return `400`.
+Event listing accepts `category`, `from`, and `to` query parameters. Bookings
+are serialized with a PostgreSQL pessimistic event lock and protected by a
+unique `(event_id, seat_number)` constraint. Redis holds short-lived seat
+reservations while a booking is being committed.
 
-## Booking and caching notes
+## Database
 
-Booking and cancellation operations use PostgreSQL pessimistic row locks on the event row to prevent overselling. Cancelling a booking restores seats and attempts to promote waitlisted entries in FIFO order. Event list/detail responses are cached in Redis with a five-minute TTL and the cache is evicted when events or seat availability change.
+The schema is maintained by Flyway in `backend/src/main/resources/db/migration`.
+An equivalent PostgreSQL schema is provided at `database/schema.sql` for review
+or manual setup. The default local profile lets Hibernate create/update tables;
+Flyway is the source of truth for production migrations.
 
-## Important
+## Notes
 
-- Never commit `application.properties`, real credentials, or a real JWT secret.
-- The included automated test currently checks application context startup; test the API flow with PostgreSQL and Redis running before submission.
+This is an assessment-sized demo: payments, email delivery, and production
+operations are intentionally outside its scope. JWTs are stored only in an
+HttpOnly, SameSite cookie; set `app.auth.cookie-secure=true` behind HTTPS.
