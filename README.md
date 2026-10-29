@@ -1,67 +1,224 @@
 # Ticket Booking Service
 
-A small full-stack event ticketing application built for the Java Development assessment.
+A ticket booking application with a **Spring Boot** REST backend and a **React** frontend.
 
-## Stack
+- JWT authentication stored in an **HttpOnly cookie**
+- Event management (create / list / details) with **category and date-range filters** and pagination
+- Ticket booking with **pessimistic locking** so the same seat can never be sold twice
+- **Redis caching** with a different TTL per cache
+- **Waitlist** for sold-out events with queue position tracking (bookings are promoted automatically when someone cancels)
+- Validation on every input and one consistent JSON response format
 
-- Java 17, Spring Boot, Spring Security, JWT in HttpOnly cookies
-- PostgreSQL for users, events, tickets, and waitlist entries
-- Redis for event caching and short-lived seat holds
-- React + Vite for the browser client
+```
+ticket-booking-service/
+├── backend/            Spring Boot 3 (Java 17), Maven
+├── frontend/           React 18 + Vite
+├── database/schema.sql PostgreSQL schema
+├── docker-compose.yml  optional: PostgreSQL + Redis in one command
+└── README.md
+```
 
-## Run locally
+## 1. Requirements
 
-1. Install Java 17+, Maven, Node.js 18+, and Docker Desktop.
-2. From the project root, start PostgreSQL and Redis:
+| Tool | Version |
+|------|---------|
+| JDK | 17 or newer |
+| Maven | 3.9+ |
+| Node.js | 18+ |
+| PostgreSQL | 14+ |
+| Redis | 6+ |
 
-   ```sh
-   docker compose up -d
-   ```
+## 2. Start PostgreSQL and Redis
 
-3. In a terminal, start the API:
+**Option A - Docker (easiest)**
 
-   ```sh
-   cd backend
-   mvn spring-boot:run
-   ```
+```bash
+docker compose up -d
+```
 
-   The API runs at `http://localhost:8080`. Local defaults are provided by
-   `backend/src/main/resources/application.properties`; that file is ignored by
-   Git as requested. For deployment, set the variables listed in
-   `backend/.env.example` in your runtime environment (Spring Boot does not load
-   `.env` files by itself).
+This starts PostgreSQL (database `ticket_booking`, user `postgres`, password `postgres`, schema loaded automatically) and Redis on the default ports.
 
-4. In another terminal, start the web client:
+**Option B - already installed locally**
 
-   ```sh
-   cd frontend
-   npm install
-   npm run dev
-   ```
+```bash
+createdb -U postgres ticket_booking
+psql -U postgres -d ticket_booking -f database/schema.sql
+redis-server
+```
 
-   Open `http://localhost:5173`.
+> Running `schema.sql` is optional. The backend uses `spring.jpa.hibernate.ddl-auto=update` and creates the tables itself if they are missing. The file is included so the schema can be reviewed and loaded by hand.
 
-## Main endpoints
+## 3. Run the backend
 
-- `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
-- `GET /api/events`, `GET /api/events/{id}`, `POST /api/events` (authenticated)
-- `POST /api/events/{eventId}/bookings`, `GET /api/bookings/mine`
-- `POST /api/events/{eventId}/waitlist`, `GET /api/events/{eventId}/waitlist/mine`
+All settings (database, Redis, JWT secret, cache TTLs) live in
+`backend/src/main/resources/application.properties`.
+That file is listed in `.gitignore` so real credentials never reach Git.
+A template with placeholder values is committed as `application.properties.example`:
 
-Event listing accepts `category`, `from`, and `to` query parameters. Bookings
-are serialized with a PostgreSQL pessimistic event lock and protected by a
-unique `(event_id, seat_number)` constraint. Redis holds short-lived seat
-reservations while a booking is being committed.
+```bash
+cd backend
+# only needed if application.properties does not exist yet (for example after a fresh git clone)
+cp src/main/resources/application.properties.example src/main/resources/application.properties
+# then edit the database user/password if yours are different
 
-## Database
+mvn spring-boot:run
+```
 
-The schema is maintained by Flyway in `backend/src/main/resources/db/migration`.
-An equivalent PostgreSQL schema is provided at `database/schema.sql` for review
-or manual setup. The default local profile lets Hibernate create/update tables;
-Flyway is the source of truth for production migrations.
+The API starts on **http://localhost:8080**.
 
-## Notes
+On the first start an empty database is filled with a demo organizer and seven events
+(set `app.seed.enabled=false` to switch that off):
 
-This is an assessment-sized demo: payments, email delivery, and production
-operations are intentionally outside its scope. JWTs are stored only in an
-HttpOnly, SameSite cookie; set `app.auth.cookie-secure=true` behind HTTPS.
+```
+email:    demo@ticketbook.com
+password: Demo@1234
+```
+
+## 4. Run the frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173**. Vite forwards every `/api` request to `localhost:8080`
+(see `frontend/vite.config.js`), so the cookie works without extra setup.
+
+## 5. API overview
+
+Every response has the same shape:
+
+```json
+{ "success": true, "message": "Events fetched successfully", "data": { }, "timestamp": "2026-10-28T10:15:30" }
+```
+
+Errors:
+
+```json
+{ "success": false, "message": "Validation failed. Please check the highlighted fields.",
+  "errors": { "email": "Please enter a valid email address" }, "timestamp": "..." }
+```
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/api/auth/register` | no | Create account (also logs in, sets cookie) |
+| POST | `/api/auth/login` | no | Login, sets the HttpOnly cookie |
+| POST | `/api/auth/logout` | no | Clears the cookie |
+| GET | `/api/auth/me` | yes | Current user |
+| GET | `/api/events` | no | List events. Query: `category`, `from`, `to` (yyyy-MM-dd), `page`, `size` |
+| GET | `/api/events/{id}` | no | Event details |
+| POST | `/api/events` | yes | Create an event |
+| POST | `/api/bookings` | yes | Book tickets `{ "eventId": 1, "quantity": 2 }` |
+| GET | `/api/bookings/my` | yes | My bookings |
+| GET | `/api/bookings/{id}` | yes | One of my bookings |
+| POST | `/api/bookings/{id}/cancel` | yes | Cancel a booking (seats go back, waitlist is served) |
+| POST | `/api/waitlist` | yes | Join the waitlist of a sold-out event `{ "eventId": 1 }` |
+| GET | `/api/waitlist/my` | yes | My waitlist entries with queue position |
+| DELETE | `/api/waitlist/{id}` | yes | Leave the waitlist |
+
+Status codes used: `200`, `201`, `400` (validation / bad input), `401` (not logged in / wrong credentials),
+`403` (not your booking), `404`, `409` (sold out, duplicate email, already waiting, ...), `500`.
+
+### Quick try with curl
+
+```bash
+# login and keep the cookie
+curl -c cookies.txt -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"demo@ticketbook.com","password":"Demo@1234"}'
+
+# filter events
+curl "http://localhost:8080/api/events?category=MUSIC&from=2026-11-01&to=2026-12-31"
+
+# book 2 tickets
+curl -b cookies.txt -X POST http://localhost:8080/api/bookings \
+  -H "Content-Type: application/json" -d '{"eventId":1,"quantity":2}'
+```
+
+### Testing the double-booking protection
+
+The seeded event **"Intimate Jazz Night (2 seats only)"** has only 2 seats. Find its id in the
+event list, then fire several requests at the same time:
+
+```bash
+EVENT_ID=7   # replace with the real id
+seq 1 6 | xargs -P 6 -I{} curl -s -o /dev/null -w "%{http_code}\n" -b cookies.txt \
+  -X POST http://localhost:8080/api/bookings \
+  -H "Content-Type: application/json" -d "{\"eventId\":$EVENT_ID,\"quantity\":1}"
+```
+
+Expected: exactly two `201` and four `409`. The event then shows as sold out, a second user can join
+the waitlist, and cancelling a booking promotes that user automatically.
+
+## 6. How it works
+
+### Authentication
+Register/login create a JWT (HS256, 24h by default) and send it back in a cookie that is
+`HttpOnly` (not readable by JavaScript), `SameSite=Lax`, and `Secure` when `app.cookie.secure=true`.
+`JwtAuthenticationFilter` reads the cookie on every request. The frontend never sees or stores the token;
+it asks `/api/auth/me` on page load to learn whether the user is logged in. Passwords are hashed with BCrypt.
+
+### Seat locking (pessimistic)
+`BookingService.bookTickets` runs in a transaction and loads the event with
+`SELECT ... FOR UPDATE` (`EventRepository.findByIdForUpdate`). Concurrent buyers of the same event queue up
+at that row lock, so each one sees the up-to-date `availableSeats`. A database `CHECK` constraint
+(`available_seats >= 0`) is a second safety net. Cancelling, joining the waitlist and waitlist promotion
+lock the event row in the same order (event first), which avoids deadlocks.
+
+Simplification: the lock protects a seat *counter* per event (you book a quantity, not seat numbers like A12).
+
+### Redis caching
+
+| Cache | What | TTL (default) | Cleared when |
+|-------|------|---------------|--------------|
+| `event` | single event details | 10 min | seats are booked / released |
+| `eventList` | filtered, paginated lists | 2 min | any event is created, any seat count changes |
+| `userBookings` | a user's tickets | 5 min | that user books or cancels (or is promoted from the waitlist) |
+
+TTLs are configurable in `application.properties`. Entries are removed *after the database commit*
+(`CacheService`), so a reader cannot put old data back into Redis. If Redis is down, the app logs a warning and
+falls back to the database.
+
+### Waitlist
+Only offered when an event is sold out. Each entry is one ticket. Position = number of people still waiting
+who joined earlier + 1. When a booking is cancelled the freed seats are given, in order, to the people at the
+front of the queue (a confirmed booking is created for them and their entry becomes `PROMOTED`).
+
+### Validation
+Bean Validation annotations on every request DTO, plus checks in the service layer (event in the future,
+seats available, ownership of bookings, ...). `GlobalExceptionHandler` converts all errors into the common JSON format.
+
+## 7. Backend structure
+
+```
+com.ticketbooking
+├── config          SecurityConfig, CorsConfig, CacheConfig, CacheErrorConfig, DataSeeder
+├── controller      Auth, Event, Booking, Waitlist controllers
+├── dto             request/ (validated inputs)   response/ (ApiResponse + response records)
+├── entity          User, Event, Booking, WaitlistEntry + enums
+├── exception       custom exceptions + GlobalExceptionHandler
+├── repository      Spring Data JPA repositories
+├── security        JwtService, JwtAuthenticationFilter, AuthCookieService, entry point
+├── service         Auth, Event, Booking, Waitlist, Cache services
+└── specification   dynamic filters for the event search
+```
+
+## 8. Frontend structure
+
+```
+src/
+├── api/          axios client + one file per resource
+├── components/   Navbar, EventCard, EventFilters, Pagination, BookingCard, WaitlistCard, ProtectedRoute, ...
+├── context/      AuthContext (login state)
+├── pages/        Home, EventDetails, Login, Register, CreateEvent, MyBookings, MyWaitlist, NotFound
+├── styles/       index.css, components.css, pages.css
+└── utils/        constants, formatters, error helpers
+```
+
+## 9. Known limitations
+
+- No automated test suite is included.
+- Seats are a counter per event, not individually numbered seats.
+- Payments are not implemented; a booking is confirmed immediately.
+- Any logged-in user can create events (there is no separate admin role).
